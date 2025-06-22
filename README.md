@@ -32,7 +32,7 @@ Author: [𝙰𝚛𝚊𝚗𝚢𝚊](https://github.com/AloozChips)🧃 || [@Alooz
 *How the OneUI emoji pack displays.*
 
 ## OTA Support
-This module supports over-the-air (OTA) updates using [update.json](https://github.com/AloozChips/OneUIEmojiPack/blob/main/update.json). Once installed, it will notify you of new releases when connected to the internet, in the modules section of your root managing app."
+This module supports over-the-air (OTA) updates using [update.json](https://github.com/AloozChips/OneUIEmojiPack/blob/main/update.json). Once installed, it will notify you of new releases when connected to the internet, in the modules section of your root managing app.
 
 ## FAQ
 ### Q: Why aren't the emojis changing after installation?
