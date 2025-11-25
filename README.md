@@ -3,6 +3,10 @@
 
 **OneUI Emoji Pack is an Android Root Module that systemlessly replaces the AOSP/system emoji pack with the OneUI emoji pack.**
 
+> **⚠️ IMPORTANT**
+> If you're on KernelSU 2.0 or above (where metamodule support is required), do **not** use any “fontloader” modules alongside this module.
+> Doing so may cause system crashes.
+
 [![Stars](https://img.shields.io/github/stars/AloozChips/OneUIEmojiPack?label=Stars&color=blue)](https://github.com/AloozChips/OneUIEmojiPack)
 [![Release](https://img.shields.io/github/v/release/AloozChips/OneUIEmojiPack?label=Release&logo=github)](https://github.com/AloozChips/OneUIEmojiPack/releases/latest)
 [![Download](https://img.shields.io/github/downloads/AloozChips/OneUIEmojiPack/total?label=Downloads&logo=github)](https://github.com/AloozChips/OneUIEmojiPack/releases/)
