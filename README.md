@@ -3,7 +3,7 @@
 
 **OneUI Emoji Pack is an Android Root Module that systemlessly replaces the AOSP/system emoji pack with the OneUI emoji pack.**
 
-> **⚠️ IMPORTANT**
+> **⚠️ IMPORTANT**:
 > If you're on KernelSU 2.0 or above (where metamodule support is required), do **not** use any “fontloader” modules alongside this module.
 > Doing so may cause system crashes.
 
