@@ -1,0 +1,7 @@
+id=OneUIEmojiPack
+name=OneUI 7 Emoji Pack
+version=v7.1
+versionCode=710
+author=𝙰𝚛𝚊𝚗𝚢𝚊🧃 || t.me/aloozchips
+description=**Default emojis may restore after reinstalling/updating apps or clearing app data. Tap the Action button to apply OneUI emojis. If the issue persists, reboot your device.**
+updateJson=https://raw.githubusercontent.com/aloozchips/OneUIEmojiPack/main/update.json
