@@ -11,7 +11,7 @@ POSTFSDATA=false
 LATESTARTSERVICE=true
 
 ui_print "*******************************"
-ui_print "      OneUI 7 Emoji Pack     "
+ui_print "     OneUI v8.5 Emoji Pack     "
 ui_print "*******************************"
 
 # Paths
