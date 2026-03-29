@@ -5,9 +5,9 @@ MODPATH=${0%/*}
 
 # Logging configuration
 LOGFILE="$MODPATH/service.log" # Log file
-MAX_LOG_SIZE=$((5 * 1024 * 1024)) # 5 MB
-MAX_LOG_FILES=3 # Keep up to 3 archived logs
-MAX_LOG_AGE_DAYS=7 # Delete logs older than 7 days
+
+# Delete previous log file
+rm -f "$LOGFILE"
 
 # Facebook app package names
 FACEBOOK_APPS="com.facebook.orca com.facebook.katana com.facebook.lite"
@@ -31,41 +31,20 @@ mkdir -p "$MODPATH"
 
 # Logging function with user feedback
 log() {
-    # Delete old log files
-    find "$MODPATH" -name "$(basename "$LOGFILE")*" -type f -mtime +$MAX_LOG_AGE_DAYS -exec rm -f {} \;
-
-    # Check if log file exists and is too large
-    if [ -f "$LOGFILE" ] && [ $(stat -c%s "$LOGFILE") -gt $MAX_LOG_SIZE ]; then
-        # Rotate logs
-        for i in $(seq $MAX_LOG_FILES -1 1); do
-            if [ -f "$LOGFILE.$i" ]; then
-                mv "$LOGFILE.$i" "$LOGFILE.$((i+1))"
-            fi
-        done
-        mv "$LOGFILE" "$LOGFILE.1"
-    fi
-
     # Create log message
     local log_message="$(date '+%Y-%m-%d %H:%M:%S') - $1"
     echo "$log_message" >> "$LOGFILE"
-    
     # Display simplified message to user
     echo "[*] $(echo "$1" | sed 's/^[A-Z]*: //')"
 }
 
-# Function to check if a package/service exists
-service_exists() {
-    pm list packages | grep -q "$1"
-    return $?
-}
-
 # Log script header
-log "================================================"
+log "=================================="
 log "OneUI Emoji Pack service.sh Script"
 log "Brand: $(getprop ro.product.brand)"
 log "Device: $(getprop ro.product.model)"
 log "Android Version: $(getprop ro.build.version.release)"
-log "================================================"
+log "=================================="
 
 # Wait until the device has completed booting
 while [ "$(getprop sys.boot_completed)" != "1" ]; do
@@ -251,16 +230,5 @@ log "INFO: Cleaning up leftover font files..."
 
 cleanup_gms_fonts
 
-# Commented out the deletion of .ttf files in the opentype directory (still need testing)
-# if [ -d "$GMS_FONTS_DIR" ]; then
-#     if ! rm -rf "$GMS_FONTS_DIR"/*ttf; then
-#         log "ERROR: Failed to clean up ttf files in directory: $GMS_FONTS_DIR"
-#     else
-#         log "INFO: Successfully cleaned up ttf files in directory: $GMS_FONTS_DIR"
-#     fi
-# else
-#     log "INFO: Directory not found: $GMS_FONTS_DIR"
-# fi
-
 log "INFO: Service completed."
-log "================================================"
+log "=================================="
