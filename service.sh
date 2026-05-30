@@ -1,266 +1,204 @@
 #!/system/bin/sh
+# service.sh — OneUI Emoji Pack (standalone boot-service script)
+MODPATH="${0%/*}"
 
-# Module directory (where the script is located)
-MODPATH=${0%/*}
+set +o standalone 2>/dev/null
+unset ASH_STANDALONE 2>/dev/null
 
-# Logging configuration
-LOGFILE="$MODPATH/service.log" # Log file
-MAX_LOG_SIZE=$((5 * 1024 * 1024)) # 5 MB
-MAX_LOG_FILES=3 # Keep up to 3 archived logs
-MAX_LOG_AGE_DAYS=7 # Delete logs older than 7 days
-
-# Facebook app package names
+# ── Configuration ──────────────────────────────────────────────────────────────
+LOGFILE="$MODPATH/service.log"
+EMOJI_FONT_SRC="$MODPATH/system/fonts/NotoColorEmoji.ttf"
 FACEBOOK_APPS="com.facebook.orca com.facebook.katana com.facebook.lite"
-
-# GMS font services
 GMS_FONT_PROVIDER="com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider"
 GMS_FONT_UPDATER="com.google.android.gms/com.google.android.gms.fonts.update.UpdateSchedulerService"
-GMS_FONT_DIR_PATTERN="com.google.android.gms/files/fonts"
-
-# Paths for cleanup
 DATA_FONTS_DIR="/data/fonts"
-GMS_FONTS_DIR="/data/data/com.google.android.gms/files/fonts/opentype"
-GMS_FONT_DIR_PATTERN="com.google.android.gms/files/fonts"
 
-# Messenger font directories
-ORCA_FONT_DIR1="/data/data/com.facebook.orca/files/fonts"
-ORCA_FONT_DIR2="/data/user/0/com.facebook.orca/files/fonts"
-
-# Ensure the log directory exists
+# ── Logging — delete existing log and start fresh every run ───────────────────
 mkdir -p "$MODPATH"
+rm -f "$LOGFILE"
 
-# Logging function with user feedback
 log() {
-    # Delete old log files
-    find "$MODPATH" -name "$(basename "$LOGFILE")*" -type f -mtime +$MAX_LOG_AGE_DAYS -exec rm -f {} \;
+    printf '%s - %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOGFILE"
+    case "$1" in
+        INFO:*|ERROR:*|WARN:*) printf '[*] %s\n' "${1#*: }" ;;
+        *) printf '[*] %s\n' "$1" ;;
+    esac
+}
 
-    # Check if log file exists and is too large
-    if [ -f "$LOGFILE" ] && [ $(stat -c%s "$LOGFILE") -gt $MAX_LOG_SIZE ]; then
-        # Rotate logs
-        for i in $(seq $MAX_LOG_FILES -1 1); do
-            if [ -f "$LOGFILE.$i" ]; then
-                mv "$LOGFILE.$i" "$LOGFILE.$((i+1))"
-            fi
-        done
-        mv "$LOGFILE" "$LOGFILE.1"
+# ── Functions ──────────────────────────────────────────────────────────────────
+
+replace_emoji_fonts() {
+    log "INFO: Starting emoji font replacement..."
+
+    if [ ! -f "$EMOJI_FONT_SRC" ]; then
+        log "ERROR: Source emoji font not found at $EMOJI_FONT_SRC. Skipping replacement."
+        return 1
     fi
 
-    # Create log message
-    local log_message="$(date '+%Y-%m-%d %H:%M:%S') - $1"
-    echo "$log_message" >> "$LOGFILE"
-    
-    # Display simplified message to user
-    echo "[*] $(echo "$1" | sed 's/^[A-Z]*: //')"
+    # Dynamically target all active user profiles without redundant symlink parsing
+    for userpath in /data/user/*/; do
+        [ -d "$userpath" ] || continue
+        local uid="${userpath%/}"
+        uid="${uid##*/}"
+
+        find "/data/user/$uid" -iname "*emoji*.ttf" 2>/dev/null | while IFS= read -r font; do
+            if [ ! -w "$font" ]; then
+                log "ERROR: Not writable: $font"
+                continue
+            fi
+            if cp "$EMOJI_FONT_SRC" "$font" && chmod 644 "$font"; then
+                log "INFO: Replaced: $font"
+            else
+                log "ERROR: Failed to replace: $font"
+            fi
+        done
+    done
+
+    log "INFO: Emoji font replacement completed."
 }
 
-# Function to check if a package/service exists
-service_exists() {
-    pm list packages | grep -q "$1"
-    return $?
+lock_messenger_emoji() {
+    log "INFO: Locking Messenger/Facebook emoji fonts..."
+
+    for userpath in /data/user/*/; do
+        [ -d "$userpath" ] || continue
+        local uid="${userpath%/}"
+        uid="${uid##*/}"
+
+        for pkg in $FACEBOOK_APPS; do
+            local base_dir="/data/user/$uid/$pkg"
+            [ -d "$base_dir" ] || continue
+
+            local target="$base_dir/app_ras_blobs/FacebookEmoji.ttf"
+            
+            # CRITICAL FIX: Unlock file if it was previously made immutable
+            if [ -f "$target" ]; then
+                chattr -i "$target" 2>/dev/null
+            fi
+
+            mkdir -p "${target%/*}"
+
+            if cp -f "$EMOJI_FONT_SRC" "$target" && chmod 444 "$target"; then
+                log "INFO: Locked emoji font for $pkg (User $uid)"
+                chattr +i "$target" 2>/dev/null \
+                    && log "INFO: Immutable flag set: $target" \
+                    || log "INFO: chattr +i not supported, using read-only fallback: $target"
+            else
+                log "ERROR: Failed to lock emoji font for $pkg (User $uid)"
+            fi
+        done
+    done
+
+    log "INFO: Messenger/Facebook emoji lock completed."
 }
 
-# Log script header
+clean_messenger_font_cache() {
+    log "INFO: Cleaning Messenger font caches..."
+
+    for userpath in /data/user/*/; do
+        [ -d "$userpath" ] || continue
+        local uid="${userpath%/}"
+        uid="${uid##*/}"
+        
+        local dir="/data/user/$uid/com.facebook.orca/files/fonts"
+        if [ -d "$dir" ]; then
+            # FIX: Temporarily restore permissions to ensure clean access
+            chmod 700 "$dir" 2>/dev/null
+            rm -rf "${dir:?}/"* \
+                && log "INFO: Cleaned cache: $dir" \
+                || log "ERROR: Failed to clean: $dir"
+        fi
+        
+        mkdir -p "$dir" && chmod 000 "$dir" \
+            && log "INFO: Locked download dir: $dir" \
+            || log "ERROR: Failed to lock: $dir"
+    done
+
+    log "INFO: Messenger font cache cleanup completed."
+}
+
+force_stop_facebook_apps() {
+    log "INFO: Force-stopping Facebook apps..."
+    for app in $FACEBOOK_APPS; do
+        am force-stop "$app" 2>/dev/null \
+            && log "INFO: Force-stopped: $app" \
+            || log "ERROR: Failed to stop: $app"
+    done
+}
+
+disable_gms_font_services() {
+    log "INFO: Disabling GMS font services..."
+
+    for userpath in /data/user/*/; do
+        [ -d "$userpath" ] || continue
+        local uid="${userpath%/}"
+        uid="${uid##*/}"
+        
+        pm disable --user "$uid" "$GMS_FONT_PROVIDER" >/dev/null 2>&1 \
+            && log "INFO: Disabled font provider for user $uid" \
+            || log "INFO: Font provider already disabled or not found for user $uid"
+            
+        pm disable --user "$uid" "$GMS_FONT_UPDATER" >/dev/null 2>&1 \
+            && log "INFO: Disabled font updater for user $uid" \
+            || log "INFO: Font updater already disabled or not found for user $uid"
+    done
+
+    log "INFO: GMS font services disabled."
+}
+
+cleanup_gms_fonts() {
+    log "INFO: Cleaning up GMS font directories..."
+
+    if [ -d "$DATA_FONTS_DIR" ]; then
+        rm -rf "$DATA_FONTS_DIR" \
+            && log "INFO: Removed $DATA_FONTS_DIR" \
+            || log "ERROR: Failed to remove $DATA_FONTS_DIR"
+    fi
+
+    # OPTIMIZATION: Avoid global find scan across all of /data
+    for userpath in /data/user/*/; do
+        [ -d "$userpath" ] || continue
+        local uid="${userpath%/}"
+        uid="${uid##*/}"
+        
+        local gms_dir="/data/user/$uid/com.google.android.gms/files/fonts"
+        if [ -d "$gms_dir" ]; then
+            rm -rf "$gms_dir" \
+                && log "INFO: Removed GMS font dir: $gms_dir" \
+                || log "ERROR: Failed to remove: $gms_dir"
+        fi
+    done
+
+    log "INFO: GMS font cleanup completed."
+}
+
+# ── Main ───────────────────────────────────────────────────────────────────────
 log "================================================"
-log "OneUI Emoji Pack service.sh Script"
-log "Brand: $(getprop ro.product.brand)"
-log "Device: $(getprop ro.product.model)"
-log "Android Version: $(getprop ro.build.version.release)"
+log "OneUI Emoji Pack — service.sh"
+log "Brand:   $(getprop ro.product.brand)"
+log "Device:  $(getprop ro.product.model)"
+log "Android: $(getprop ro.build.version.release)"
 log "================================================"
 
-# Wait until the device has completed booting
+# Wait for device boot to fully complete
 while [ "$(getprop sys.boot_completed)" != "1" ]; do
     sleep 5
 done
 
-# Wait until the /sdcard directory is available
+# Wait for /sdcard to be accessible
 while [ ! -d /sdcard ]; do
     sleep 5
 done
 
-log "INFO: Service started."
-
-# Replace in-app emoji fonts
-replace_emoji_fonts() {
-    log "INFO: Starting emoji replacement process..."
-
-    # Check if the source emoji font exists
-    if [ ! -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" ]; then
-        log "ERROR: Source emoji font not found. Skipping replacement."
-        return
-    fi
-
-    # Find all .ttf files containing "Emoji" in their names
-    EMOJI_FONTS=$(find /data/data /data/user/0 -iname "*emoji*.ttf" 2>/dev/null)
-
-    if [ -z "$EMOJI_FONTS" ]; then
-        log "INFO: No emoji fonts found to replace. Skipping."
-        return
-    fi
-
-    # Replace each emoji font with the custom font
-    for font in $EMOJI_FONTS; do
-        # Check if the target font file is writable
-        if [ ! -w "$font" ]; then
-            log "ERROR: Font file is not writable: $font"
-            continue
-        fi
-
-        log "INFO: Replacing emoji font: $font"
-        if ! cp "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$font"; then
-            log "ERROR: Failed to replace emoji font: $font"
-        else
-            log "INFO: Successfully replaced emoji font: $font"
-        fi
-
-        # Set permissions for the replaced file
-        if ! chmod 644 "$font"; then
-            log "ERROR: Failed to set permissions for: $font"
-        else
-            log "INFO: Successfully set permissions for: $font"
-        fi
-    done
-
-    log "INFO: Emoji replacement process completed."
-}
+log "INFO: Boot completed. Service started."
 
 replace_emoji_fonts
-
-lock_messenger_emoji() {
-    log "INFO: Applying permanent Messenger/Facebook emoji lock..."
-
-    for pkg in $FACEBOOK_APPS; do
-        if [ ! -d "/data/data/$pkg" ]; then
-            log "INFO: Package not found, skipping lock: $pkg"
-            continue
-        fi
-
-        target="/data/data/$pkg/app_ras_blobs/FacebookEmoji.ttf"
-        mkdir -p "/data/data/$pkg/app_ras_blobs"
-
-        log "INFO: Locking emoji file for $pkg"
-
-        if ! cp -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$target"; then
-            log "ERROR: Failed to copy font to $target"
-            continue
-        fi
-
-        if ! chmod 444 "$target"; then
-            log "ERROR: Failed to set read-only permissions on $target"
-        else
-            log "INFO: Successfully set read-only permissions on $target"
-        fi
-
-        # Try to make the file truly immutable
-        if chattr +i "$target" 2>/dev/null; then
-            log "INFO: Successfully made file immutable (chattr +i): $target"
-        else
-            log "INFO: chattr +i not supported or failed (normal on some filesystems) - using read-only fallback"
-        fi
-    done
-
-    log "INFO: Permanent Messenger/Facebook emoji lock completed."
-}
-
 lock_messenger_emoji
-
-# Clean Messenger emoji caches
-log "INFO: Cleaning Messenger font caches..."
-
-for dir in "$ORCA_FONT_DIR1" "$ORCA_FONT_DIR2"; do
-    if [ -d "$dir" ]; then
-        if rm -rf "$dir"/*; then
-            log "INFO: Successfully cleaned Messenger font cache: $dir"
-        else
-            log "ERROR: Failed to clean Messenger font cache: $dir"
-        fi
-    else
-        log "INFO: Messenger font cache directory not found: $dir"
-    fi
-done
-
-# Block Messenger from downloading emoji fonts
-log "INFO: Blocking Messenger emoji font downloads..."
-
-for dir in "$ORCA_FONT_DIR1" "$ORCA_FONT_DIR2"; do
-    if mkdir -p "$dir"; then
-        log "INFO: Created directory: $dir"
-    else
-        log "ERROR: Failed to create directory: $dir"
-    fi
-
-    if chmod 000 "$dir"; then
-        log "INFO: Locked directory permissions: $dir"
-    else
-        log "ERROR: Failed to lock directory: $dir"
-    fi
-done
-
-# Force-stop Facebook apps after all replacements are done
-log "INFO: Force-stopping apps..."
-for app in $FACEBOOK_APPS; do
-    if ! am force-stop "$app"; then
-        log "ERROR: Failed to force-stop app: $app"
-    else
-        log "INFO: Successfully force-stopped app: $app"
-    fi
-done
-
-# Add a delay to allow the system to process the changes
+clean_messenger_font_cache
+force_stop_facebook_apps
 sleep 2
-
-# Disable GMS font services for all users
-disable_gms_font_services() {
-    log "INFO: Disabling GMS font services for all users..."
-
-    USERS=$(ls -d /data/user/* 2>/dev/null)
-
-    for userpath in $USERS; do
-
-        USERID=${userpath##*/}
-
-        if pm disable --user "$USERID" "$GMS_FONT_PROVIDER" >/dev/null 2>&1; then
-            log "INFO: Disabled GMS font provider for user $USERID"
-        fi
-
-        if pm disable --user "$USERID" "$GMS_FONT_UPDATER" >/dev/null 2>&1; then
-            log "INFO: Disabled GMS font updater for user $USERID"
-        fi
-
-    done
-}
-
 disable_gms_font_services
-
-# Remove GMS generated fonts
-cleanup_gms_fonts() {
-log "INFO: Cleaning up leftover font files..."
-
-    if [ -d "$DATA_FONTS_DIR" ]; then
-        rm -rf "$DATA_FONTS_DIR"
-        log "INFO: Removed $DATA_FONTS_DIR"
-    fi
-
-    find /data -type d -path "*$GMS_FONT_DIR_PATTERN*" 2>/dev/null | while read dir; do
-        if rm -rf "$dir"; then
-            log "INFO: Removed GMS font directory: $dir"
-        else
-            log "ERROR: Failed removing: $dir"
-        fi
-    done
-}
-
 cleanup_gms_fonts
-
-# Commented out the deletion of .ttf files in the opentype directory (still need testing)
-# if [ -d "$GMS_FONTS_DIR" ]; then
-#     if ! rm -rf "$GMS_FONTS_DIR"/*ttf; then
-#         log "ERROR: Failed to clean up ttf files in directory: $GMS_FONTS_DIR"
-#     else
-#         log "INFO: Successfully cleaned up ttf files in directory: $GMS_FONTS_DIR"
-#     fi
-# else
-#     log "INFO: Directory not found: $GMS_FONTS_DIR"
-# fi
 
 log "INFO: Service completed."
 log "================================================"
